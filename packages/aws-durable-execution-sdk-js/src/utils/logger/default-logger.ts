@@ -110,6 +110,14 @@ function formatDurableLogData(
     result.attempt = logData.attempt;
   }
 
+  if (logData.traceId !== undefined) {
+    result.traceId = logData.traceId;
+  }
+
+  if (logData.spanId !== undefined) {
+    result.spanId = logData.spanId;
+  }
+
   if (messageParams.length === 1) {
     result.message = messageParams[0];
     try {

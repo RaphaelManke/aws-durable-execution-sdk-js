@@ -184,7 +184,6 @@ const createChildSpanOptions = (
   name: string | undefined,
   executionArn: string,
   parentId: string | undefined,
-  executionMode: DurableExecutionMode,
 ): OperationSpanOptions => {
   if (subType === OperationSubType.PARALLEL_BRANCH) {
     return {
@@ -194,7 +193,6 @@ const createChildSpanOptions = (
       operationName: name,
       executionArn,
       parentId,
-      executionMode,
       attributes: {
         "durable.parallel.branch.id": entityId,
         ...(name ? { "durable.parallel.branch.name": name } : {}),
@@ -210,7 +208,6 @@ const createChildSpanOptions = (
       operationName: name,
       executionArn,
       parentId,
-      executionMode,
       attributes: {
         ...(name ? { "durable.parallel.name": name } : {}),
       },
@@ -229,7 +226,6 @@ const createChildSpanOptions = (
       operationName: name,
       executionArn,
       parentId,
-      executionMode,
       attributes: {
         "durable.map.item.id": entityId,
         ...(itemIndex !== undefined
@@ -243,7 +239,6 @@ const createChildSpanOptions = (
   return {
     executionArn,
     parentId,
-    executionMode,
   };
 };
 
@@ -322,7 +317,6 @@ export const handleCompletedChildContext = async <
           stepName,
           context.durableExecutionArn,
           entityId,
-          DurableExecutionMode.ReplaySucceededContext,
         ),
       );
     });
@@ -427,7 +421,6 @@ export const executeChildContext = async <T, Logger extends DurableLogger>(
             name,
             context.durableExecutionArn,
             parentId,
-            childReplayMode,
           ),
         );
       },
