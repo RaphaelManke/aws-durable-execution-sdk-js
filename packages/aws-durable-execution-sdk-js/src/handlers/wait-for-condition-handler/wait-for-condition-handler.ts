@@ -29,6 +29,10 @@ import {
   WaitForConditionError,
 } from "../../errors/durable-error/durable-error";
 import { DurableLogger } from "../../types/durable-logger";
+import {
+  withWaitForConditionSpan,
+  endAllActiveParentSpans,
+} from "../../utils/otel/otel-instrumentation";
 
 export const createWaitForConditionHandler = <Logger extends DurableLogger>(
   context: ExecutionContext,
@@ -135,6 +139,7 @@ export const createWaitForConditionHandler = <Logger extends DurableLogger>(
           },
         );
         return (async (): Promise<T> => {
+          endAllActiveParentSpans();
           await checkpoint.waitForRetryTimer(stepId);
           stepData = context.getStepData(stepId);
           return await executeCheckLogic();
@@ -207,12 +212,26 @@ export const createWaitForConditionHandler = <Logger extends DurableLogger>(
             },
           );
 
-          const newState: T = await runWithContext(
+          // CRITICAL: Create the span here, wrapping the actual execution of the check function.
+          // This ensures the span is created in the same Lambda invocation where the check executes,
+          // preventing "Missing span" issues when execution spans multiple invocations (e.g., after retry timers).
+          // The span will be active when the check function runs, ensuring proper parent-child relationships.
+          const newState: T = await withWaitForConditionSpan(
             stepId,
-            parentId,
-            () => check(currentState, waitForConditionContext),
-            currentAttempt,
-            DurableExecutionMode.ExecutionMode,
+            name,
+            async () =>
+              await runWithContext(
+                stepId,
+                parentId,
+                () => check(currentState, waitForConditionContext),
+                currentAttempt,
+                DurableExecutionMode.ExecutionMode,
+              ),
+            {
+              executionArn: context.durableExecutionArn,
+              parentId,
+              attempt: currentAttempt,
+            },
           );
 
           const serializedState = await safeSerialize(
@@ -283,6 +302,7 @@ export const createWaitForConditionHandler = <Logger extends DurableLogger>(
             },
           );
 
+          endAllActiveParentSpans(name || "wait-for-condition");
           await checkpoint.waitForRetryTimer(stepId);
           return await executeCheckLogic();
         } catch (error) {

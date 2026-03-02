@@ -35,6 +35,10 @@ import { runWithContext } from "../../utils/context-tracker/context-tracker";
 import { createErrorObjectFromError } from "../../utils/error-object/error-object";
 import { validateReplayConsistency } from "../../utils/replay-validation/replay-validation";
 import { DurableLogger } from "../../types/durable-logger";
+import {
+  withStepSpan,
+  endAllActiveParentSpans,
+} from "../../utils/otel/otel-instrumentation";
 
 export const createStepHandler = <Logger extends DurableLogger>(
   context: ExecutionContext,
@@ -143,13 +147,14 @@ export const createStepHandler = <Logger extends DurableLogger>(
           },
         );
         return (async (): Promise<T> => {
+          endAllActiveParentSpans();
           await checkpoint.waitForRetryTimer(stepId);
           stepData = context.getStepData(stepId);
           return await executeStepLogic();
         })();
       }
 
-      // Check for interrupted step with AT_MOST_ONCE_PER_RETRY
+      // Check if interrupted step with AT_MOST_ONCE_PER_RETRY
       if (
         stepData?.Status === OperationStatus.STARTED &&
         semantics === StepSemantics.AtMostOncePerRetry
@@ -211,6 +216,7 @@ export const createStepHandler = <Logger extends DurableLogger>(
         );
 
         return (async (): Promise<T> => {
+          endAllActiveParentSpans();
           await checkpoint.waitForRetryTimer(stepId);
           stepData = context.getStepData(stepId);
           return await executeStepLogic();
@@ -263,13 +269,28 @@ export const createStepHandler = <Logger extends DurableLogger>(
             },
           );
 
+          // Create the span here, wrapping the actual execution of the step function.
+          // This ensures the span is created in the same Lambda invocation where the step executes,
+          // preventing "Missing span" issues when execution spans multiple invocations.
+          // The span will be active when the step function runs, ensuring proper parent-child relationships.
           let result: T;
-          result = await runWithContext(
+          result = await withStepSpan(
             stepId,
-            parentId,
-            () => fn(stepContext),
-            currentAttempt + 1,
-            DurableExecutionMode.ExecutionMode,
+            name,
+            async () => {
+              return await runWithContext(
+                stepId,
+                parentId,
+                () => fn(stepContext),
+                currentAttempt + 1,
+                DurableExecutionMode.ExecutionMode,
+              );
+            },
+            {
+              executionArn: context.durableExecutionArn,
+              parentId,
+              attempt: currentAttempt + 1,
+            },
           );
 
           const serializedResult = await safeSerialize(
@@ -375,6 +396,7 @@ export const createStepHandler = <Logger extends DurableLogger>(
             },
           );
 
+          endAllActiveParentSpans(name || stepId);
           await checkpoint.waitForRetryTimer(stepId);
           return await executeStepLogic();
         }
